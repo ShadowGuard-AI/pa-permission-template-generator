@@ -115,7 +115,7 @@ def analyze_directory_permissions(
     """
     file_permissions_data = []
     try:
-        spec = PathSpec.from_lines("gitwildcard", exclude_patterns)
+        spec = PathSpec.from_lines("gitwildmatch", exclude_patterns)
         for root, _, files in os.walk(source_dir):
             for file in files:
                 file_path = os.path.join(root, file)
@@ -180,7 +180,7 @@ def write_output(
                 json_data = json.loads(data)  # Validate JSON before writing
             except json.JSONDecodeError as e:
                 logging.error(f"Invalid JSON data: {e}")
-                return
+                return False
 
             with open(output_file, "w") as f:
                 json.dump(json_data, f, indent=4)
@@ -191,25 +191,28 @@ def write_output(
                 logging.error(
                     "PyYAML is not installed. Please install it to use YAML output format."
                 )
-                return
+                return False
             try:
                 yaml_data = yaml.safe_load(data)
             except yaml.YAMLError as e:
                 logging.error(f"Invalid YAML data: {e}")
-                return
+                return False
 
             with open(output_file, "w") as f:
                 yaml.dump(yaml_data, f, indent=2)
         else:
             logging.error(f"Invalid output format: {output_format}")
-            return
+            return False
 
         logging.info(f"Successfully wrote output to {output_file}")
+        return True
 
     except OSError as e:
         logging.error(f"Error writing to file {output_file}: {e}")
+        return False
     except Exception as e:
         logging.error(f"An unexpected error occurred: {e}")
+        return False
 
 
 def main() -> None:
@@ -228,22 +231,29 @@ def main() -> None:
         logging.error(f"Template file {args.template_file} does not exist.")
         sys.exit(1)
 
+    source_resolved = os.path.realpath(args.source_dir)
+    output_resolved = os.path.realpath(args.output_file)
+    template_resolved = os.path.realpath(args.template_file)
+    if output_resolved == template_resolved or output_resolved == source_resolved or output_resolved.startswith(source_resolved + os.sep):
+        logging.error("Output file must not be the template file or a file inside the source directory.")
+        sys.exit(1)
+
     # Core functionality
     permissions_data = analyze_directory_permissions(
         args.source_dir, args.exclude_patterns
     )
 
     if not permissions_data:
-        logging.warning("No permissions data collected.  Check source directory and exclude patterns.")
-        # Decide whether to exit or continue with empty data based on requirements
-        # sys.exit(0)  # Exit if no data is collected.
+        logging.error("No files analyzed: no permission data collected. Check source directory and exclude patterns.")
+        sys.exit(1)
 
     rendered_template = render_template(args.template_file, permissions_data)
 
     if rendered_template is None:
         sys.exit(1)  # Exit if template rendering failed
 
-    write_output(args.output_file, rendered_template, args.output_format)
+    if not write_output(args.output_file, rendered_template, args.output_format):
+        sys.exit(1)
 
 
 if __name__ == "__main__":
