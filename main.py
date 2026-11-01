@@ -116,12 +116,16 @@ def analyze_directory_permissions(
     file_permissions_data = []
     try:
         spec = PathSpec.from_lines("gitwildmatch", exclude_patterns)
+        # I walk files only. Directory permissions never reach the template, so a loose directory
+        # guarding loose files stays invisible in the output.
         for root, _, files in os.walk(source_dir):
             for file in files:
                 file_path = os.path.join(root, file)
                 relative_path = os.path.relpath(file_path, source_dir)
 
                 # Exclude files based on patterns
+                # The patterns only skip files at match time. An excluded directory is still walked in
+                # full, so a huge excluded tree costs the whole walk anyway.
                 if spec.match_file(relative_path):
                     logging.debug(f"Excluding file: {file_path}")
                     continue
@@ -153,6 +157,8 @@ def render_template(
     try:
         env = jinja2.Environment(
             loader=jinja2.FileSystemLoader(os.path.dirname(template_file)),
+        # select_autoescape keys off the template file name. A template named with an html suffix
+        # gets its quotes escaped, and the JSON it was meant to render stops parsing downstream.
             autoescape=jinja2.select_autoescape(["html", "xml"]),
         )
         template = env.get_template(os.path.basename(template_file))
@@ -177,6 +183,9 @@ def write_output(
     try:
         if output_format == "json":
             try:
+            # The rendered text is parsed and dumped again on the way out, so the ordering and
+            # formatting the template author chose are lost, and a template that renders plain
+            # text can never pass this gate at all.
                 json_data = json.loads(data)  # Validate JSON before writing
             except json.JSONDecodeError as e:
                 logging.error(f"Invalid JSON data: {e}")
